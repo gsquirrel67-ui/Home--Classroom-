@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home- Classroom</title>
+<style>
+:root{color-scheme:dark;--bg:#101827;--panel:#182438;--panel2:#202f47;--text:#f4f7fb;--muted:#aab8cb;--accent:#7c9cff;--border:#31425d}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top,#1e3150 0,#101827 55%);font:16px/1.5 system-ui,sans-serif;color:var(--text);min-height:100vh}
+header{padding:28px 20px 20px;text-align:center;border-bottom:1px solid var(--border)}h1{margin:0;font-size:clamp(2rem,5vw,3rem);letter-spacing:-.04em}header p{margin:8px 0 0;color:var(--muted)}
+main{max-width:1100px;margin:auto;padding:24px 18px 48px}.toolbar{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:20px}.toolbar input{flex:1;min-width:180px}
+input,textarea,button{font:inherit;border-radius:10px;border:1px solid var(--border);padding:11px 13px}input,textarea{background:#0d1522;color:var(--text);width:100%}button{cursor:pointer;background:var(--accent);border-color:transparent;color:#101827;font-weight:700}button.secondary{background:var(--panel2);border-color:var(--border);color:var(--text)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}.card{background:linear-gradient(160deg,var(--panel),#141f31);border:1px solid var(--border);border-radius:16px;padding:17px;min-height:150px;display:flex;flex-direction:column;gap:10px}.card h3{margin:0;font-size:1.15rem;overflow-wrap:anywhere}.card p{margin:0;color:var(--muted);font-size:.92rem}.card .actions{display:flex;gap:8px;margin-top:auto}.card .actions button{flex:1}.empty{border:1px dashed var(--border);border-radius:16px;padding:35px;text-align:center;color:var(--muted);grid-column:1/-1}
+details{margin:24px 0;background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:17px}summary{font-weight:750;cursor:pointer;font-size:1.1rem}form{display:grid;gap:12px;margin-top:16px}label{display:grid;gap:6px;font-size:.93rem;color:var(--muted)}textarea{min-height:170px;resize:vertical;font:13px/1.5 ui-monospace,monospace}.note{color:var(--muted);font-size:.9rem}.status{margin:0 0 16px;color:var(--muted);font-size:.9rem}.viewer{position:fixed;inset:0;background:#070b12ed;z-index:5;padding:16px;display:none;flex-direction:column;gap:10px}.viewer.open{display:flex}.viewerbar{display:flex;align-items:center;gap:12px}.viewerbar strong{flex:1;overflow-wrap:anywhere}iframe{background:white;border:0;border-radius:12px;flex:1;width:100%}footer{text-align:center;color:var(--muted);padding:15px;font-size:.85rem}
+</style>
+</head>
+<body>
+<header><h1>Home- Classroom</h1><p>A shared shelf for browser games and class projects</p></header>
+<main>
+ <p class="status" id="status">Shared game library is not configured yet.</p>
+ <div class="toolbar"><input id="search" type="search" placeholder="Search games…" aria-label="Search games"><button id="addBtn">＋ Add a game</button><button id="refresh" class="secondary">Refresh</button></div>
+ <section id="games" class="grid" aria-live="polite"><div class="empty">Connect the shared database to load community games.</div></section>
+ <details id="editor"><summary>Add a game for everyone</summary>
+ <form id="gameForm">
+  <label>Game name<input id="gameName" required maxlength="70" placeholder="e.g. Pixel Runner"></label>
+  <label>Short description (optional)<input id="gameDesc" maxlength="140" placeholder="A quick arcade game"></label>
+  <label>HTML code<textarea id="gameCode" required spellcheck="false" placeholder="Paste your complete HTML game here…"></textarea></label>
+  <div class="toolbar"><button type="submit">Publish game</button><button type="button" class="secondary" id="clearForm">Clear</button></div>
+ </form>
+ <p class="note">Published games can be seen by everyone who visits this site. Only submit games you trust. HTML code is unreviewed user content; the player runs it in a restricted iframe. This demo does not include accounts, moderation, or spam prevention.</p>
+ </details>
+</main>
+<footer>Home- Classroom · Community game library</footer>
+<div class="viewer" id="viewer" role="dialog" aria-modal="true" aria-label="Game player"><div class="viewerbar"><strong id="playingTitle">Game</strong><button class="secondary" id="closeGame">Close game</button></div><iframe id="player" title="Game content" sandbox="allow-scripts allow-forms" referrerpolicy="no-referrer"></iframe></div>
+<script>
+/*
+ SETUP:
+ 1. Create a Supabase project at https://supabase.com/
+ 2. In SQL Editor, run the SQL from setup.sql included with this site.
+ 3. In Project Settings -> API, copy Project URL and publishable/anon key.
+ 4. Replace the two placeholder strings below, then publish this index.html again.
+ Never put a service_role/secret key in browser code.
+*/
+const SUPABASE_URL = "PASTE_YOUR_SUPABASE_PROJECT_URL_HERE";
+const SUPABASE_ANON_KEY = "PASTE_YOUR_SUPABASE_PUBLISHABLE_OR_ANON_KEY_HERE";
+const configured = SUPABASE_URL.startsWith("https://") && !SUPABASE_URL.includes("PASTE_") && !SUPABASE_ANON_KEY.includes("PASTE_");
+const $=id=>document.getElementById(id);
+let games=[];
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function headers(extra={}){return {'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY,'Content-Type':'application/json',...extra};}
+async function request(path,opts={}) {
+ const r=await fetch(SUPABASE_URL+'/rest/v1/'+path,{...opts,headers:headers(opts.headers||{})});
+ if(!r.ok) throw new Error(await r.text()||('Request failed: '+r.status));
+ if(r.status===204) return [];
+ return r.json();
+}
+async function loadGames(){
+ if(!configured){$('status').textContent='Setup needed: connect Supabase using the included setup.sql instructions.';render();return;}
+ $('status').textContent='Loading shared games…';
+ try{games=await request('games?select=id,name,description,html,created_at&order=created_at.desc&limit=100');$('status').textContent='Connected · Published games are shared with everyone.';render();}
+ catch(e){$('status').textContent='Could not load shared games. Check the Supabase URL, key, table, and permissions.';console.error(e);render();}
+}
+function render(){
+ const q=$('search').value.trim().toLowerCase();
+ const shown=games.filter(g=>(g.name+' '+(g.description||'')).toLowerCase().includes(q));
+ $('games').innerHTML=shown.length?shown.map(g=>`<article class="card"><h3>${esc(g.name)}</h3><p>${esc(g.description||'HTML game')} · Shared</p><div class="actions"><button data-play="${esc(g.id)}">Play</button></div></article>`).join(''):'<div class="empty">No games found yet. Add the first one!</div>';
+}
+$('search').addEventListener('input',render);
+$('addBtn').addEventListener('click',()=>{$('editor').open=true;$('gameName').focus();$('editor').scrollIntoView({behavior:'smooth',block:'start'});});
+$('refresh').addEventListener('click',loadGames);
+$('clearForm').addEventListener('click',()=>$('gameForm').reset());
+$('gameForm').addEventListener('submit',async e=>{
+ e.preventDefault();
+ if(!configured){alert('The shared database is not configured yet. Follow the setup.sql instructions and add your Supabase URL and publishable/anon key.');return;}
+ const name=$('gameName').value.trim(),html=$('gameCode').value,description=$('gameDesc').value.trim();
+ if(!name||!html.trim())return;
+ if(html.length>200000){alert('Please keep each game under 200 KB.');return;}
+ const submit=e.submitter;submit.disabled=true;submit.textContent='Publishing…';
+ try{await request('games',{method:'POST',headers:{'Prefer':'return=minimal'},body:JSON.stringify({name,description,html})});$('gameForm').reset();$('editor').open=false;await loadGames();alert('Game published for everyone!');}
+ catch(err){console.error(err);alert('Could not publish. Check the database setup and permissions.');}
+ finally{submit.disabled=false;submit.textContent='Publish game';}
+});
+$('games').addEventListener('click',e=>{
+ const b=e.target.closest('[data-play]');if(!b)return;
+ const g=games.find(x=>String(x.id)===b.dataset.play);if(!g)return;
+ $('playingTitle').textContent=g.name;$('player').srcdoc=g.html;$('viewer').classList.add('open');$('closeGame').focus();
+});
+function close(){$('player').srcdoc='';$('viewer').classList.remove('open');}
+$('closeGame').addEventListener('click',close);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('viewer').classList.contains('open'))close();});
+loadGames();
+</script>
+</body></html>
